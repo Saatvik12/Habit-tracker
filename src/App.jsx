@@ -749,13 +749,15 @@ const smallDangerBtn = {
 
 // ─── Habit Tracker (main UI, shown when logged in) ───────────────────────────
 
-function HabitTracker({ habits, setHabits, onLogout, userEmail, syncing }) {
+function HabitTracker({ habits, setHabits, onLogout, userEmail, firstName, onUpdateName, syncing }) {
   const [weekOffset, setWeekOffset]   = useState(0);
   const [monthOffset, setMonthOffset] = useState(0);
   const [modalOpen, setModalOpen]     = useState(false);
   const [editTarget, setEditTarget]   = useState(null);
   const [moreOpen, setMoreOpen]       = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [editingName, setEditingName] = useState(false);
+  const [nameInput, setNameInput] = useState(firstName || '');
 
   const toggleToday = (id) => {
     const today = todayStr();
@@ -837,9 +839,36 @@ function HabitTracker({ habits, setHabits, onLogout, userEmail, syncing }) {
               <div style={{ fontSize: 12, color: '#8b8b9a', marginBottom: 4, fontWeight: 500 }}>
                 {new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })}
               </div>
-              <h1 style={{ margin: 0, fontSize: 22, fontWeight: 800, letterSpacing: '-0.02em' }}>
-                Hey Saatvik! 👋
-              </h1>
+              {editingName ? (
+                <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 2 }}>
+                  <input
+                    autoFocus
+                    value={nameInput}
+                    onChange={e => setNameInput(e.target.value)}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter' && nameInput.trim()) {
+                        onUpdateName(nameInput.trim());
+                        setEditingName(false);
+                      }
+                      if (e.key === 'Escape') setEditingName(false);
+                    }}
+                    placeholder="Your name"
+                    style={{ ...inp, marginBottom: 0, fontSize: 18, fontWeight: 800, padding: '6px 10px' }}
+                  />
+                  <button
+                    onClick={() => {
+                      if (nameInput.trim()) { onUpdateName(nameInput.trim()); setEditingName(false); }
+                    }}
+                    style={{ ...primaryBtn, flex: 'none', padding: '8px 12px', fontSize: 12 }}
+                  >
+                    Save
+                  </button>
+                </div>
+              ) : (
+                <h1 style={{ margin: 0, fontSize: 22, fontWeight: 800, letterSpacing: '-0.02em' }}>
+                  Hey {firstName || 'there'}! 👋
+                </h1>
+              )}
               <p style={{ margin: '4px 0 0', fontSize: 12, color: '#8b8b9a' }}>
                 {todayDone === habits.length && habits.length > 0
                   ? 'All done for today 🎉'
@@ -853,13 +882,22 @@ function HabitTracker({ habits, setHabits, onLogout, userEmail, syncing }) {
                   {syncing ? '● Syncing' : '● Synced'}
                 </span>
               </div>
-              <button onClick={onLogout} style={{
-                background: 'transparent', border: 'none', color: '#8b8b9a',
-                fontSize: 11, cursor: 'pointer', padding: '6px 0 0', textAlign: 'left',
-                fontWeight: 600, textDecoration: 'underline',
-              }}>
-                Log out
-              </button>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 6 }}>
+                <button onClick={() => { setNameInput(firstName || ''); setEditingName(true); }} style={{
+                  background: 'transparent', border: 'none', color: '#8b8b9a',
+                  fontSize: 11, cursor: 'pointer', padding: 0, textAlign: 'left',
+                  fontWeight: 600, textDecoration: 'underline',
+                }}>
+                  {firstName ? 'Edit name' : 'Set your name'}
+                </button>
+                <button onClick={onLogout} style={{
+                  background: 'transparent', border: 'none', color: '#8b8b9a',
+                  fontSize: 11, cursor: 'pointer', padding: 0, textAlign: 'left',
+                  fontWeight: 600, textDecoration: 'underline',
+                }}>
+                  Log out
+                </button>
+              </div>
             </div>
           </div>
 
@@ -1002,6 +1040,7 @@ function Login({ onLogin }) {
   const [mode, setMode] = useState('login'); // 'login' | 'signup'
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [firstName, setFirstName] = useState('');
   const [error, setError] = useState('');
   const [info, setInfo] = useState('');
   const [loading, setLoading] = useState(false);
@@ -1013,13 +1052,21 @@ function Login({ onLogin }) {
       setError('Please enter both email and password.');
       return;
     }
+    if (mode === 'signup' && !firstName.trim()) {
+      setError('Please enter your first name.');
+      return;
+    }
     setLoading(true);
     try {
       if (mode === 'login') {
         const { error } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
         if (error) throw error;
       } else {
-        const { error } = await supabase.auth.signUp({ email: email.trim(), password });
+        const { error } = await supabase.auth.signUp({
+          email: email.trim(),
+          password,
+          options: { data: { first_name: firstName.trim() } },
+        });
         if (error) throw error;
         setInfo('Account created! If email confirmation is enabled, check your inbox. Otherwise you can log in now.');
       }
@@ -1053,6 +1100,16 @@ function Login({ onLogin }) {
         </p>
 
         <form onSubmit={handleSubmit}>
+          {mode === 'signup' && (
+            <>
+              <label style={lbl}>First name</label>
+              <input
+                type="text" value={firstName} onChange={e => setFirstName(e.target.value)}
+                placeholder="Saatvik" style={inp} autoComplete="given-name"
+              />
+            </>
+          )}
+
           <label style={lbl}>Email</label>
           <input
             type="email" value={email} onChange={e => setEmail(e.target.value)}
@@ -1154,6 +1211,12 @@ export default function App() {
     setHabits([]);
   };
 
+  const handleUpdateName = async (newName) => {
+    const { data, error } = await supabase.auth.updateUser({ data: { first_name: newName } });
+    if (error) console.error('Failed to update name:', error);
+    else if (data?.user) setSession(prev => prev ? { ...prev, user: data.user } : prev);
+  };
+
   if (session === undefined) {
     // Still checking auth state
     return (
@@ -1189,6 +1252,8 @@ export default function App() {
       setHabits={setHabits}
       onLogout={handleLogout}
       userEmail={session.user.email}
+      firstName={session.user.user_metadata?.first_name || ''}
+      onUpdateName={handleUpdateName}
       syncing={syncing}
     />
   );
