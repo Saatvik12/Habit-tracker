@@ -55,6 +55,19 @@ function GlobalStyles() {
   return <style>{GLOBAL_STYLES}</style>;
 }
 
+// Detects narrow viewports so we can avoid overlapping fixed-position UI on mobile
+function useIsMobile(breakpoint = 760) {
+  const [isMobile, setIsMobile] = useState(
+    typeof window !== 'undefined' ? window.innerWidth < breakpoint : false
+  );
+  useEffect(() => {
+    const onResize = () => setIsMobile(window.innerWidth < breakpoint);
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, [breakpoint]);
+  return isMobile;
+}
+
 // ─── Constants ───────────────────────────────────────────────────────────────
 
 // ─── Theme tokens ──────────────────────────────────────────────────────────
@@ -116,7 +129,7 @@ function categoryGlow(accent) {
 }
 
 function getCategory(categories, categoryId) {
-  return categories.find(c => c.id === categoryId) || categories[0] || { id: 'none', label: 'Other', accent: '#8b8b9a', icon: '✨' };
+  return categories.find(c => c.id === categoryId) || categories[0] || { id: 'none', label: 'Other', accent: '#8b8b9a', emoji: '✨' };
 }
 
 const ALL_DAYS = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
@@ -172,10 +185,12 @@ function isScheduled(habit, dateStr) {
 
 // ─── Progress Ring ────────────────────────────────────────────────────────────
 
-function ProgressRing({ done, accent, glow, onClick, size = 52 }) {
+function ProgressRing({ done, accent, glow, onClick, theme, size = 52 }) {
   const r = (size - 8) / 2;
   const circ = 2 * Math.PI * r;
   const [pressed, setPressed] = useState(false);
+  const trackColor = theme.bg === THEMES.dark.bg ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.12)';
+  const idleIconColor = theme.bg === THEMES.dark.bg ? 'rgba(255,255,255,0.35)' : 'rgba(0,0,0,0.35)';
 
   return (
     <div
@@ -183,6 +198,7 @@ function ProgressRing({ done, accent, glow, onClick, size = 52 }) {
       onMouseDown={() => setPressed(true)}
       onMouseUp={() => setPressed(false)}
       onMouseLeave={() => setPressed(false)}
+      title={done ? 'Mark as not done' : 'Mark as done'}
       style={{
         width: size, height: size, cursor: 'pointer', flexShrink: 0,
         transform: pressed ? 'scale(0.93)' : 'scale(1)',
@@ -192,7 +208,7 @@ function ProgressRing({ done, accent, glow, onClick, size = 52 }) {
     >
       <svg width={size} height={size} style={{ display: 'block' }}>
         <circle cx={size/2} cy={size/2} r={r} fill="none"
-          stroke="rgba(255,255,255,0.07)" strokeWidth={5} />
+          stroke={trackColor} strokeWidth={5} />
         <circle cx={size/2} cy={size/2} r={r} fill="none"
           stroke={accent} strokeWidth={5}
           strokeDasharray={circ}
@@ -201,9 +217,10 @@ function ProgressRing({ done, accent, glow, onClick, size = 52 }) {
           transform={`rotate(-90 ${size/2} ${size/2})`}
           style={{ transition: 'stroke-dashoffset 0.4s cubic-bezier(0.34,1.56,0.64,1)' }}
         />
-        <text x={size/2} y={size/2 + 5} textAnchor="middle"
-          fontSize={done ? 18 : 15} fill={done ? accent : 'rgba(255,255,255,0.25)'}>
-          {done ? '✓' : '○'}
+        <text x={size/2} y={size/2 + 6} textAnchor="middle"
+          fontSize={done ? 20 : 18} fontWeight={done ? 700 : 500}
+          fill={done ? accent : idleIconColor}>
+          {done ? '✓' : '✓'}
         </text>
       </svg>
     </div>
@@ -605,9 +622,9 @@ function HabitCard({ habit, categories, onToggle, onOpen, theme }) {
         background: `${accent}18`,
         border: `1px solid ${accent}30`,
         display: 'flex', alignItems: 'center', justifyContent: 'center',
-        fontSize: 18, fontWeight: 800, color: accent,
+        fontSize: cat.emoji ? 21 : 18, fontWeight: 800, color: accent,
       }}>
-        {cat.label ? cat.label.charAt(0).toUpperCase() : '✨'}
+        {cat.emoji || (cat.label ? cat.label.charAt(0).toUpperCase() : '✨')}
       </div>
 
       {/* Text */}
@@ -644,7 +661,7 @@ function HabitCard({ habit, categories, onToggle, onOpen, theme }) {
       </div>
 
       {/* Ring */}
-      <ProgressRing done={done} accent={accent} glow={glow} onClick={() => onToggle(habit.id)} />
+      <ProgressRing done={done} accent={accent} glow={glow} onClick={() => onToggle(habit.id)} theme={theme} />
     </div>
   );
 }
@@ -659,6 +676,7 @@ function HabitModal({ initial, categories, onAddCategory, onSave, onClose, onDel
   const [addingCategory, setAddingCategory] = useState(false);
   const [newCatName, setNewCatName] = useState('');
   const [newCatColor, setNewCatColor] = useState(CATEGORY_COLOR_PALETTE[0]);
+  const [newCatEmoji, setNewCatEmoji] = useState('');
 
   const toggleDay = (i) => {
     setRepeatDays(prev =>
@@ -682,10 +700,11 @@ function HabitModal({ initial, categories, onAddCategory, onSave, onClose, onDel
 
   const handleAddCategory = () => {
     if (!newCatName.trim() || categories.length >= 6) return;
-    const newCat = { id: crypto.randomUUID(), label: newCatName.trim(), accent: newCatColor };
+    const newCat = { id: crypto.randomUUID(), label: newCatName.trim(), accent: newCatColor, emoji: newCatEmoji || null };
     onAddCategory(newCat);
     setCategory(newCat.id);
     setNewCatName('');
+    setNewCatEmoji('');
     setAddingCategory(false);
   };
 
@@ -729,7 +748,12 @@ function HabitModal({ initial, categories, onAddCategory, onSave, onClose, onDel
               display: 'flex', alignItems: 'center', gap: 8,
               transition: 'all 0.15s',
             }}>
-              <div style={{ width: 14, height: 14, borderRadius: '50%', background: cat.accent, flexShrink: 0 }} />
+              <div style={{
+                width: 14, height: 14, borderRadius: '50%', background: cat.emoji ? 'transparent' : cat.accent,
+                flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12,
+              }}>
+                {cat.emoji || ''}
+              </div>
               <span style={{
                 fontSize: 12, color: category === cat.id ? cat.accent : theme.textDim, fontWeight: 500,
                 whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
@@ -746,10 +770,18 @@ function HabitModal({ initial, categories, onAddCategory, onSave, onClose, onDel
               border: `1.5px dashed ${theme.cardBorder}`, borderRadius: 12,
               padding: 12, marginBottom: 16,
             }}>
-              <input
-                autoFocus value={newCatName} onChange={e => setNewCatName(e.target.value)}
-                placeholder="Category name" style={{ ...inp(theme), marginBottom: 10 }}
-              />
+              <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
+                <EmojiPickerButton
+                  value={newCatEmoji}
+                  onChange={setNewCatEmoji}
+                  theme={theme}
+                  accent={newCatColor}
+                />
+                <input
+                  autoFocus value={newCatName} onChange={e => setNewCatName(e.target.value)}
+                  placeholder="Category name" style={{ ...inp(theme), marginBottom: 0, flex: 1 }}
+                />
+              </div>
               <div style={{ display: 'flex', gap: 6, marginBottom: 10, flexWrap: 'wrap' }}>
                 {CATEGORY_COLOR_PALETTE.map(c => (
                   <div key={c} onClick={() => setNewCatColor(c)} style={{
@@ -761,7 +793,7 @@ function HabitModal({ initial, categories, onAddCategory, onSave, onClose, onDel
               </div>
               <div style={{ display: 'flex', gap: 8 }}>
                 <button onClick={handleAddCategory} style={primaryBtn(theme)}>Add category</button>
-                <button onClick={() => { setAddingCategory(false); setNewCatName(''); }} style={ghostBtn(theme)}>Cancel</button>
+                <button onClick={() => { setAddingCategory(false); setNewCatName(''); setNewCatEmoji(''); }} style={ghostBtn(theme)}>Cancel</button>
               </div>
             </div>
           ) : (
@@ -867,8 +899,8 @@ const smallDangerBtn = {
 // ─── Settings Modal ───────────────────────────────────────────────────────────
 
 function SettingsModal({
-  firstName, categories, themeName, onClose, onLogout, theme,
-  draftRef,
+  firstName, categories, themeName, originalTheme,
+  onClose, onCancel, onSave, onLiveThemeChange, onLogout, theme,
 }) {
   const [nameInput, setNameInput] = useState(firstName || '');
   const [cats, setCats] = useState(categories);
@@ -876,14 +908,31 @@ function SettingsModal({
   const [addingCat, setAddingCat] = useState(false);
   const [newCatName, setNewCatName] = useState('');
   const [newCatColor, setNewCatColor] = useState(CATEGORY_COLOR_PALETTE[0]);
+  const [newCatEmoji, setNewCatEmoji] = useState('');
 
-  // Keep a ref with the latest draft so the parent can save on close
-  draftRef.current = { nameInput, cats, selectedTheme };
+  const handleThemeClick = (t) => {
+    setSelectedTheme(t);
+    onLiveThemeChange(t); // apply immediately for live preview
+  };
+
+  const handleClose = () => {
+    // Closed without saving -> revert theme preview to original
+    if (selectedTheme !== originalTheme) onLiveThemeChange(originalTheme);
+    onCancel();
+  };
+
+  const handleSave = () => {
+    onSave({
+      name: nameInput.trim(),
+      categories: cats,
+      theme: selectedTheme,
+    });
+  };
 
   const handleAddCat = () => {
     if (!newCatName.trim() || cats.length >= 6) return;
-    setCats(prev => [...prev, { id: crypto.randomUUID(), label: newCatName.trim(), accent: newCatColor }]);
-    setNewCatName(''); setAddingCat(false);
+    setCats(prev => [...prev, { id: crypto.randomUUID(), label: newCatName.trim(), accent: newCatColor, emoji: newCatEmoji || null }]);
+    setNewCatName(''); setNewCatEmoji(''); setAddingCat(false);
   };
 
   const handleRemoveCat = (id) => {
@@ -894,18 +943,22 @@ function SettingsModal({
     setCats(prev => prev.map(c => c.id === id ? { ...c, accent: color } : c));
   };
 
+  const handleRecategoryEmoji = (id, emoji) => {
+    setCats(prev => prev.map(c => c.id === id ? { ...c, emoji: emoji || null } : c));
+  };
+
   return (
     <div style={{
       position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)',
       display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 250,
-    }} onClick={onClose}>
+    }} onClick={handleClose}>
       <div onClick={e => e.stopPropagation()} style={{
         background: theme.panel, border: `1px solid ${theme.panelBorder}`,
         borderRadius: 24, padding: 28, width: 400, maxWidth: '90vw',
         maxHeight: '85vh', overflowY: 'auto', position: 'relative',
         boxShadow: theme.shadow,
       }}>
-        <button onClick={onClose} aria-label="Close settings" style={{
+        <button onClick={handleClose} aria-label="Close settings" style={{
           position: 'absolute', top: 18, right: 18,
           background: theme.hoverBg, border: `1px solid ${theme.cardBorder}`,
           borderRadius: 8, width: 28, height: 28, color: theme.textDim,
@@ -930,7 +983,13 @@ function SettingsModal({
               display: 'flex', alignItems: 'center', gap: 8,
               background: theme.cardBg, borderRadius: 12, padding: '8px 10px',
             }}>
-              <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', maxWidth: 110 }}>
+              <EmojiPickerButton
+                value={cat.emoji}
+                onChange={(emoji) => handleRecategoryEmoji(cat.id, emoji)}
+                theme={theme}
+                accent={cat.accent}
+              />
+              <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', maxWidth: 96 }}>
                 {CATEGORY_COLOR_PALETTE.map(c => (
                   <div key={c} onClick={() => handleRecolor(cat.id, c)} style={{
                     width: 16, height: 16, borderRadius: '50%', background: c, cursor: 'pointer',
@@ -958,8 +1017,16 @@ function SettingsModal({
         {cats.length < 6 && (
           addingCat ? (
             <div style={{ border: `1.5px dashed ${theme.cardBorder}`, borderRadius: 12, padding: 12, marginBottom: 16 }}>
-              <input autoFocus value={newCatName} onChange={e => setNewCatName(e.target.value)}
-                placeholder="Category name" style={{ ...inp(theme), marginBottom: 10 }} />
+              <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
+                <EmojiPickerButton
+                  value={newCatEmoji}
+                  onChange={setNewCatEmoji}
+                  theme={theme}
+                  accent={newCatColor}
+                />
+                <input autoFocus value={newCatName} onChange={e => setNewCatName(e.target.value)}
+                  placeholder="Category name" style={{ ...inp(theme), marginBottom: 0, flex: 1 }} />
+              </div>
               <div style={{ display: 'flex', gap: 6, marginBottom: 10, flexWrap: 'wrap' }}>
                 {CATEGORY_COLOR_PALETTE.map(c => (
                   <div key={c} onClick={() => setNewCatColor(c)} style={{
@@ -971,7 +1038,7 @@ function SettingsModal({
               </div>
               <div style={{ display: 'flex', gap: 8 }}>
                 <button onClick={handleAddCat} style={primaryBtn(theme)}>Add</button>
-                <button onClick={() => { setAddingCat(false); setNewCatName(''); }} style={ghostBtn(theme)}>Cancel</button>
+                <button onClick={() => { setAddingCat(false); setNewCatName(''); setNewCatEmoji(''); }} style={ghostBtn(theme)}>Cancel</button>
               </div>
             </div>
           ) : (
@@ -988,7 +1055,7 @@ function SettingsModal({
         <label style={lbl(theme)}>Theme</label>
         <div style={{ display: 'flex', gap: 8, marginBottom: 24 }}>
           {['dark', 'light'].map(t => (
-            <button key={t} onClick={() => setSelectedTheme(t)} style={{
+            <button key={t} onClick={() => handleThemeClick(t)} style={{
               flex: 1, padding: '10px 0', borderRadius: 10, fontSize: 13, fontWeight: 600,
               cursor: 'pointer', textTransform: 'capitalize',
               border: selectedTheme === t ? `1.5px solid ${theme.text}` : `1.5px solid ${theme.inputBorder}`,
@@ -1003,10 +1070,69 @@ function SettingsModal({
         <button onClick={onLogout} style={{
           width: '100%', background: '#FF4E6A', color: '#fff', border: 'none',
           borderRadius: 12, padding: '12px 0', fontSize: 14, fontWeight: 700, cursor: 'pointer',
+          marginBottom: 10,
         }}>
           Log out
         </button>
+
+        <button onClick={handleSave} style={{ ...primaryBtn(theme), width: '100%' }}>
+          Save settings
+        </button>
       </div>
+    </div>
+  );
+}
+
+// ─── Emoji picker button (small popover) ──────────────────────────────────────
+
+const EMOJI_OPTIONS = ['🏃','🧘','📚','✨','💪','🎯','🎨','🍎','💧','😴','🧠','💼','🎵','🌱','❤️','📝','🏠','💰'];
+
+function EmojiPickerButton({ value, onChange, theme, accent }) {
+  const [open, setOpen] = useState(false);
+
+  return (
+    <div style={{ position: 'relative', flexShrink: 0 }}>
+      <button
+        onClick={(e) => { e.stopPropagation(); setOpen(o => !o); }}
+        style={{
+          width: 32, height: 32, borderRadius: 10, flexShrink: 0,
+          background: `${accent}18`, border: `1px solid ${accent}30`,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          fontSize: 16, cursor: 'pointer', padding: 0,
+          color: accent, fontWeight: 800,
+        }}
+        title="Choose an emoji"
+      >
+        {value || '+'}
+      </button>
+      {open && (
+        <div
+          onClick={e => e.stopPropagation()}
+          style={{
+            position: 'absolute', top: 38, left: 0, zIndex: 300,
+            background: theme.panel, border: `1px solid ${theme.panelBorder}`,
+            borderRadius: 12, padding: 8, boxShadow: theme.shadow,
+            display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: 4,
+            width: 180,
+          }}
+        >
+          {EMOJI_OPTIONS.map(e => (
+            <button key={e} onClick={() => { onChange(e); setOpen(false); }} style={{
+              background: 'transparent', border: 'none', fontSize: 18, cursor: 'pointer',
+              padding: 4, borderRadius: 6,
+            }}>
+              {e}
+            </button>
+          ))}
+          <button onClick={() => { onChange(''); setOpen(false); }} style={{
+            gridColumn: 'span 6', background: 'transparent', border: `1px solid ${theme.cardBorder}`,
+            borderRadius: 6, color: theme.textDim, fontSize: 11, cursor: 'pointer',
+            padding: '6px 0', marginTop: 4, fontWeight: 600,
+          }}>
+            No emoji
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -1031,7 +1157,8 @@ function HabitTracker({
   const longPressTimer = React.useRef(null);
 
   const theme = THEMES[themeName] || THEMES.dark;
-  const settingsDraftRef = React.useRef(null);
+  const isMobile = useIsMobile();
+  const settingsOriginalThemeRef = React.useRef(themeName);
 
   const toggleToday = (id) => {
     const today = todayStr();
@@ -1062,49 +1189,119 @@ function HabitTracker({
     onUpdateCategories([...categories, cat]);
   };
 
-  const handleSettingsClose = () => {
-    const draft = settingsDraftRef.current;
-    if (draft) {
-      if (draft.nameInput.trim() && draft.nameInput.trim() !== firstName) {
-        onUpdateName(draft.nameInput.trim());
-      }
-      onUpdateCategories(draft.cats);
-      if (draft.selectedTheme !== themeName) {
-        onUpdateTheme(draft.selectedTheme);
-      }
-    }
+  const openSettings = () => {
+    settingsOriginalThemeRef.current = themeName;
+    setSettingsOpen(true);
+  };
+
+  const handleSettingsCancel = () => {
+    setSettingsOpen(false);
+  };
+
+  const handleSettingsSave = ({ name, categories: newCats, theme: newTheme }) => {
+    if (name && name !== firstName) onUpdateName(name);
+    onUpdateCategories(newCats);
+    onUpdateTheme(newTheme);
     setSettingsOpen(false);
   };
 
   // ─── Drag-to-reorder handlers ───
-  const startLongPress = (index) => {
-    longPressTimer.current = setTimeout(() => {
-      setDragIndex(index);
-    }, 500);
-  };
-  const cancelLongPress = () => {
+  // Long-press (500ms) on a habit card starts a drag; moving the pointer
+  // over other cards reorders them live; releasing finalizes the order.
+  const cardRefs = React.useRef({});
+  const dragStateRef = React.useRef({ active: false });
+
+  const clearLongPress = () => {
     if (longPressTimer.current) {
       clearTimeout(longPressTimer.current);
       longPressTimer.current = null;
     }
   };
-  const handleDragEnter = (index) => {
-    if (dragIndex === null || dragIndex === index) return;
-    setOverIndex(index);
-  };
-  const finishDrag = () => {
-    if (dragIndex !== null && overIndex !== null && dragIndex !== overIndex) {
-      setHabits(prev => {
-        const next = [...prev];
-        const [moved] = next.splice(dragIndex, 1);
-        next.splice(overIndex, 0, moved);
-        return next;
-      });
-    }
+
+  const endDrag = () => {
+    dragStateRef.current = { active: false };
     setDragIndex(null);
     setOverIndex(null);
-    cancelLongPress();
+    window.removeEventListener('pointermove', onPointerMoveRef.current);
+    window.removeEventListener('pointerup', onPointerUpRef.current);
   };
+
+  const onPointerMoveRef = React.useRef(() => {});
+  const onPointerUpRef = React.useRef(() => {});
+
+  onPointerMoveRef.current = (e) => {
+    if (!dragStateRef.current.active) return;
+    const y = e.clientY;
+    let closestIndex = null;
+    let closestDist = Infinity;
+    habits.forEach((h, idx) => {
+      const el = cardRefs.current[h.id];
+      if (!el) return;
+      const rect = el.getBoundingClientRect();
+      const center = rect.top + rect.height / 2;
+      const dist = Math.abs(center - y);
+      if (dist < closestDist) {
+        closestDist = dist;
+        closestIndex = idx;
+      }
+    });
+    if (closestIndex !== null) setOverIndex(closestIndex);
+  };
+
+  onPointerUpRef.current = () => {
+    const { dragIndex: di } = dragStateRef.current;
+    setHabits(prev => {
+      const overIdx = dragStateRef.current.overIndex;
+      if (di == null || overIdx == null || di === overIdx) return prev;
+      const next = [...prev];
+      const [moved] = next.splice(di, 1);
+      next.splice(overIdx, 0, moved);
+      return next;
+    });
+    endDrag();
+  };
+
+  const startLongPress = (index, e) => {
+    // Avoid starting a drag from a normal click/scroll: cancel if pointer
+    // moves more than a few pixels before the long-press threshold fires.
+    const startX = e.clientX, startY = e.clientY;
+    const moveCancelHandler = (moveEvent) => {
+      const dx = Math.abs(moveEvent.clientX - startX);
+      const dy = Math.abs(moveEvent.clientY - startY);
+      if (dx > 8 || dy > 8) {
+        clearLongPress();
+        window.removeEventListener('pointermove', moveCancelHandler);
+      }
+    };
+    window.addEventListener('pointermove', moveCancelHandler);
+
+    longPressTimer.current = setTimeout(() => {
+      window.removeEventListener('pointermove', moveCancelHandler);
+      dragStateRef.current = { active: true, dragIndex: index, overIndex: index };
+      setDragIndex(index);
+      setOverIndex(index);
+      window.addEventListener('pointermove', onPointerMoveRef.current);
+      window.addEventListener('pointerup', onPointerUpRef.current);
+    }, 500);
+
+    // Clean up the move-cancel listener once the press ends (pointerup before activation)
+    const upCleanup = () => {
+      window.removeEventListener('pointermove', moveCancelHandler);
+      window.removeEventListener('pointerup', upCleanup);
+    };
+    window.addEventListener('pointerup', upCleanup);
+  };
+
+  const cancelLongPress = () => {
+    clearLongPress();
+  };
+
+  // Keep dragStateRef.overIndex in sync with state for the pointerup handler
+  React.useEffect(() => {
+    if (dragStateRef.current.active) {
+      dragStateRef.current.overIndex = overIndex;
+    }
+  }, [overIndex]);
 
   const todayDone = habits.filter(h => h.entries[todayStr()]?.done).length;
 
@@ -1179,7 +1376,7 @@ function HabitTracker({
               </div>
             </div>
             <button
-              onClick={() => setSettingsOpen(true)}
+              onClick={openSettings}
               aria-label="Open settings"
               style={{ ...navBtn(theme), width: 36, height: 36, fontSize: 16, marginTop: 2 }}
             >
@@ -1223,21 +1420,20 @@ function HabitTracker({
               {habits.map((habit, index) => (
                 <div
                   key={habit.id}
-                  onMouseDown={() => startLongPress(index)}
-                  onMouseUp={cancelLongPress}
-                  onMouseLeave={() => { cancelLongPress(); if (dragIndex !== null) finishDrag(); }}
-                  onTouchStart={() => startLongPress(index)}
-                  onTouchEnd={() => { cancelLongPress(); if (dragIndex !== null) finishDrag(); }}
-                  onMouseEnter={() => handleDragEnter(index)}
+                  ref={(el) => { if (el) cardRefs.current[habit.id] = el; else delete cardRefs.current[habit.id]; }}
+                  onPointerDown={(e) => startLongPress(index, e)}
+                  onPointerUp={() => { if (!dragStateRef.current.active) cancelLongPress(); }}
+                  onPointerLeave={() => { if (!dragStateRef.current.active) cancelLongPress(); }}
                   style={{
-                    opacity: dragIndex === index ? 0.5 : 1,
+                    opacity: dragIndex === index ? 0.4 : 1,
                     outline: overIndex === index && dragIndex !== null && dragIndex !== index
                       ? `2px dashed ${theme.textDim}` : 'none',
                     outlineOffset: 2,
                     borderRadius: 20,
                     transition: 'opacity 0.15s',
-                    cursor: dragIndex !== null ? 'grabbing' : undefined,
+                    cursor: dragIndex !== null ? 'grabbing' : 'default',
                     userSelect: dragIndex !== null ? 'none' : undefined,
+                    touchAction: dragIndex !== null ? 'none' : undefined,
                   }}
                 >
                   <HabitCard
@@ -1287,7 +1483,7 @@ function HabitTracker({
         )}
 
         {/* Floating mini top-streak card, only when sidebar is open */}
-        {sidebarOpen && (
+        {sidebarOpen && !isMobile && (
           <TopStreaksCardFloating habits={habits} onMore={() => setMoreOpen(true)} theme={theme} />
         )}
 
@@ -1345,10 +1541,12 @@ function HabitTracker({
           firstName={firstName}
           categories={categories}
           themeName={themeName}
-          onClose={handleSettingsClose}
+          originalTheme={settingsOriginalThemeRef.current}
+          onCancel={handleSettingsCancel}
+          onSave={handleSettingsSave}
+          onLiveThemeChange={onUpdateTheme}
           onLogout={onLogout}
           theme={theme}
-          draftRef={settingsDraftRef}
         />
       )}
     </div>
@@ -1480,9 +1678,9 @@ function Login({ onLogin }) {
 function OnboardingCategories({ onNext, onSkip }) {
   const theme = THEMES.dark;
   const [cats, setCats] = useState([
-    { name: '', color: CATEGORY_COLOR_PALETTE[0] },
-    { name: '', color: CATEGORY_COLOR_PALETTE[1] },
-    { name: '', color: CATEGORY_COLOR_PALETTE[2] },
+    { name: '', color: CATEGORY_COLOR_PALETTE[0], emoji: '' },
+    { name: '', color: CATEGORY_COLOR_PALETTE[1], emoji: '' },
+    { name: '', color: CATEGORY_COLOR_PALETTE[2], emoji: '' },
   ]);
 
   const updateCat = (i, field, value) => {
@@ -1493,13 +1691,13 @@ function OnboardingCategories({ onNext, onSkip }) {
     if (cats.length >= 6) return;
     const usedColors = cats.map(c => c.color);
     const nextColor = CATEGORY_COLOR_PALETTE.find(c => !usedColors.includes(c)) || CATEGORY_COLOR_PALETTE[cats.length % CATEGORY_COLOR_PALETTE.length];
-    setCats(prev => [...prev, { name: '', color: nextColor }]);
+    setCats(prev => [...prev, { name: '', color: nextColor, emoji: '' }]);
   };
 
   const handleNext = () => {
     const filled = cats
       .filter(c => c.name.trim())
-      .map(c => ({ id: crypto.randomUUID(), label: c.name.trim(), accent: c.color }));
+      .map(c => ({ id: crypto.randomUUID(), label: c.name.trim(), accent: c.color, emoji: c.emoji || null }));
     onNext(filled);
   };
 
@@ -1526,6 +1724,12 @@ function OnboardingCategories({ onNext, onSkip }) {
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 16 }}>
           {cats.map((cat, i) => (
             <div key={i} style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              <EmojiPickerButton
+                value={cat.emoji}
+                onChange={(emoji) => updateCat(i, 'emoji', emoji)}
+                theme={theme}
+                accent={cat.color}
+              />
               <input
                 value={cat.name}
                 onChange={e => updateCat(i, 'name', e.target.value)}
