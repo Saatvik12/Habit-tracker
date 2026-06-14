@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { supabase } from './supabaseClient';
 
 // ─── Global styles (font + custom scrollbar) ─────────────────────────────────
 
@@ -56,8 +57,6 @@ function GlobalStyles() {
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
-const STORAGE_KEY = 'habit-tracker-v4';
-
 const CATEGORY_COLORS = {
   health:       { accent: '#FF4E6A', glow: 'rgba(255,78,106,0.25)',  label: 'Health & Fitness',      icon: '🏃' },
   mindfulness:  { accent: '#9B6DFF', glow: 'rgba(155,109,255,0.25)', label: 'Mindfulness & Mental',  icon: '🧘' },
@@ -69,10 +68,10 @@ const ALL_DAYS = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
 const MONTH_NAMES = ['January','February','March','April','May','June','July','August','September','October','November','December'];
 
 const DEFAULT_HABITS = [
-  { id: '1', name: 'Morning Run',  category: 'health',       subtitle: 'Build endurance daily',   repeatDays: [0,1,2,3,4,5,6], entries: {} },
-  { id: '2', name: 'Meditate',     category: 'mindfulness',  subtitle: 'Clear your mind, 10 min', repeatDays: [0,1,2,3,4,5,6], entries: {} },
-  { id: '3', name: 'Read & Learn', category: 'productivity', subtitle: 'One chapter every day',   repeatDays: [0,1,2,3,4,5,6], entries: {} },
-  { id: '4', name: 'Make the Bed', category: 'routine',      subtitle: 'Start with a small win',  repeatDays: [0,1,2,3,4,5,6], entries: {} },
+  { id: '1', name: 'Morning Run',  category: 'health',       subtitle: 'Build endurance daily',   repeatDays: [0,1,2,3,4,5,6], createdAt: toDateStr(new Date()), entries: {} },
+  { id: '2', name: 'Meditate',     category: 'mindfulness',  subtitle: 'Clear your mind, 10 min', repeatDays: [0,1,2,3,4,5,6], createdAt: toDateStr(new Date()), entries: {} },
+  { id: '3', name: 'Read & Learn', category: 'productivity', subtitle: 'One chapter every day',   repeatDays: [0,1,2,3,4,5,6], createdAt: toDateStr(new Date()), entries: {} },
+  { id: '4', name: 'Make the Bed', category: 'routine',      subtitle: 'Start with a small win',  repeatDays: [0,1,2,3,4,5,6], createdAt: toDateStr(new Date()), entries: {} },
 ];
 
 // ─── Date Helpers ─────────────────────────────────────────────────────────────
@@ -115,6 +114,7 @@ function jsDowToRepeatIndex(jsDow) {
   return (jsDow + 6) % 7; // Sun(0)->6, Mon(1)->0, ... Sat(6)->5
 }
 function isScheduled(habit, dateStr) {
+  if (habit.createdAt && dateStr < habit.createdAt) return false;
   const jsDow = new Date(dateStr).getDay();
   const idx = jsDowToRepeatIndex(jsDow);
   return habit.repeatDays.includes(idx);
@@ -614,6 +614,7 @@ function HabitModal({ initial, onSave, onClose, onDelete }) {
       name: name.trim(), subtitle: subtitle.trim(),
       category,
       repeatDays: repeatDays.length ? repeatDays : [0,1,2,3,4,5,6],
+      createdAt: initial?.createdAt || todayStr(),
       entries: initial?.entries || {},
     });
   };
@@ -746,23 +747,15 @@ const smallDangerBtn = {
   padding: '6px 10px', fontSize: 11, cursor: 'pointer', fontWeight: 600,
 };
 
-// ─── App ──────────────────────────────────────────────────────────────────────
+// ─── Habit Tracker (main UI, shown when logged in) ───────────────────────────
 
-export default function App() {
-  const [habits, setHabits] = useState(() => {
-    try { return JSON.parse(localStorage.getItem(STORAGE_KEY)) || DEFAULT_HABITS; }
-    catch { return DEFAULT_HABITS; }
-  });
+function HabitTracker({ habits, setHabits, onLogout, userEmail, syncing }) {
   const [weekOffset, setWeekOffset]   = useState(0);
   const [monthOffset, setMonthOffset] = useState(0);
   const [modalOpen, setModalOpen]     = useState(false);
   const [editTarget, setEditTarget]   = useState(null);
   const [moreOpen, setMoreOpen]       = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);
-
-  useEffect(() => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(habits));
-  }, [habits]);
 
   const toggleToday = (id) => {
     const today = todayStr();
@@ -852,6 +845,21 @@ export default function App() {
                   ? 'All done for today 🎉'
                   : `${todayDone} of ${habits.length} done today`}
               </p>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 10 }}>
+                <span style={{ fontSize: 11, color: '#5a5a66', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 140 }}>
+                  {userEmail}
+                </span>
+                <span style={{ fontSize: 10, color: syncing ? '#FFB830' : '#00E5CC', fontWeight: 600 }}>
+                  {syncing ? '● Syncing' : '● Synced'}
+                </span>
+              </div>
+              <button onClick={onLogout} style={{
+                background: 'transparent', border: 'none', color: '#8b8b9a',
+                fontSize: 11, cursor: 'pointer', padding: '6px 0 0', textAlign: 'left',
+                fontWeight: 600, textDecoration: 'underline',
+              }}>
+                Log out
+              </button>
             </div>
           </div>
 
@@ -987,3 +995,201 @@ const hamburgerLine = {
   display: 'block', width: 16, height: 2, borderRadius: 1,
   background: '#c4c4cc',
 };
+
+// ─── Login Screen ─────────────────────────────────────────────────────────────
+
+function Login({ onLogin }) {
+  const [mode, setMode] = useState('login'); // 'login' | 'signup'
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState('');
+  const [info, setInfo] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setError(''); setInfo('');
+    if (!email.trim() || !password) {
+      setError('Please enter both email and password.');
+      return;
+    }
+    setLoading(true);
+    try {
+      if (mode === 'login') {
+        const { error } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
+        if (error) throw error;
+      } else {
+        const { error } = await supabase.auth.signUp({ email: email.trim(), password });
+        if (error) throw error;
+        setInfo('Account created! If email confirmation is enabled, check your inbox. Otherwise you can log in now.');
+      }
+    } catch (err) {
+      setError(err.message || 'Something went wrong.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div style={{
+      height: '100vh', width: '100vw',
+      background: '#0d0d14', color: '#f0f0f5',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      boxSizing: 'border-box', padding: 16,
+    }}>
+      <GlobalStyles />
+      <div style={{
+        background: '#15151d', border: '1px solid rgba(255,255,255,0.07)',
+        borderRadius: 22, padding: 32, width: 380, maxWidth: '100%',
+        boxShadow: '0 12px 40px rgba(0,0,0,0.45)',
+      }}>
+        <h1 style={{ margin: '0 0 4px', fontSize: 24, fontWeight: 800 }}>
+          {mode === 'login' ? 'Welcome back' : 'Create your account'}
+        </h1>
+        <p style={{ margin: '0 0 24px', fontSize: 13, color: '#8b8b9a' }}>
+          {mode === 'login'
+            ? 'Log in to sync your habits across devices.'
+            : 'Sign up to start syncing your habits everywhere.'}
+        </p>
+
+        <form onSubmit={handleSubmit}>
+          <label style={lbl}>Email</label>
+          <input
+            type="email" value={email} onChange={e => setEmail(e.target.value)}
+            placeholder="you@example.com" style={inp} autoComplete="email"
+          />
+
+          <label style={lbl}>Password</label>
+          <input
+            type="password" value={password} onChange={e => setPassword(e.target.value)}
+            placeholder="••••••••" style={inp}
+            autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
+          />
+
+          {error && (
+            <div style={{ color: '#FF4E6A', fontSize: 12, marginBottom: 12 }}>{error}</div>
+          )}
+          {info && (
+            <div style={{ color: '#00E5CC', fontSize: 12, marginBottom: 12 }}>{info}</div>
+          )}
+
+          <button type="submit" disabled={loading} style={{ ...primaryBtn, width: '100%', opacity: loading ? 0.6 : 1 }}>
+            {loading ? 'Please wait…' : mode === 'login' ? 'Log in' : 'Sign up'}
+          </button>
+        </form>
+
+        <button
+          onClick={() => { setMode(mode === 'login' ? 'signup' : 'login'); setError(''); setInfo(''); }}
+          style={{
+            background: 'transparent', border: 'none', color: '#8b8b9a',
+            fontSize: 13, cursor: 'pointer', marginTop: 16, width: '100%', textAlign: 'center',
+          }}
+        >
+          {mode === 'login' ? "Don't have an account? Sign up" : 'Already have an account? Log in'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ─── Top-level App: handles auth + cloud sync ────────────────────────────────
+
+export default function App() {
+  const [session, setSession] = useState(undefined); // undefined = loading, null = logged out
+  const [habits, setHabits] = useState([]);
+  const [loadingHabits, setLoadingHabits] = useState(true);
+  const [syncing, setSyncing] = useState(false);
+
+  // Watch auth state
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data }) => setSession(data.session));
+    const { data: listener } = supabase.auth.onAuthStateChange((_event, newSession) => {
+      setSession(newSession);
+    });
+    return () => listener.subscription.unsubscribe();
+  }, []);
+
+  // Load habits when logged in
+  useEffect(() => {
+    if (!session) return;
+    let cancelled = false;
+    setLoadingHabits(true);
+    (async () => {
+      const { data, error } = await supabase
+        .from('habits')
+        .select('data')
+        .eq('user_id', session.user.id)
+        .maybeSingle();
+
+      if (cancelled) return;
+      if (error) {
+        console.error('Failed to load habits:', error);
+        setHabits(DEFAULT_HABITS);
+      } else if (data && data.data) {
+        setHabits(data.data);
+      } else {
+        setHabits(DEFAULT_HABITS);
+      }
+      setLoadingHabits(false);
+    })();
+    return () => { cancelled = true; };
+  }, [session]);
+
+  // Save habits to Supabase whenever they change (debounced)
+  useEffect(() => {
+    if (!session || loadingHabits) return;
+    setSyncing(true);
+    const timeout = setTimeout(async () => {
+      const { error } = await supabase
+        .from('habits')
+        .upsert({ user_id: session.user.id, data: habits, updated_at: new Date().toISOString() }, { onConflict: 'user_id' });
+      if (error) console.error('Failed to save habits:', error);
+      setSyncing(false);
+    }, 800);
+    return () => clearTimeout(timeout);
+  }, [habits, session, loadingHabits]);
+
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
+    setHabits([]);
+  };
+
+  if (session === undefined) {
+    // Still checking auth state
+    return (
+      <div style={{
+        height: '100vh', width: '100vw', background: '#0d0d14', color: '#8b8b9a',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+      }}>
+        <GlobalStyles />
+        Loading…
+      </div>
+    );
+  }
+
+  if (!session) {
+    return <Login onLogin={() => {}} />;
+  }
+
+  if (loadingHabits) {
+    return (
+      <div style={{
+        height: '100vh', width: '100vw', background: '#0d0d14', color: '#8b8b9a',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+      }}>
+        <GlobalStyles />
+        Loading your habits…
+      </div>
+    );
+  }
+
+  return (
+    <HabitTracker
+      habits={habits}
+      setHabits={setHabits}
+      onLogout={handleLogout}
+      userEmail={session.user.email}
+      syncing={syncing}
+    />
+  );
+}
